@@ -29,6 +29,6 @@ jobs:
       - name: Upload to Deno Deploy
         uses: denoland/deployctl@v1
         with:
-          project: "kilati-media-api-79"
+          project: "kilati-media-api-47"
           entrypoint: "main.tsx"
           root: "."
