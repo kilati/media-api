@@ -1,40 +1,64 @@
-use wasm_bindgen::prelude::*;
+mod config;
+mod service;
+mod authentication;
+mod models;
+mod context;
+mod router;
 
-#[wasm_bindgen]
-pub fn add(a: i32, b: i32) -> i32 {
-  a + b
+use config::config::Config;
+use std::sync::Arc;
+
+use axum::http::{
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
+    HeaderValue, Method,
+};
+use dotenv::dotenv;
+use router::route::create_router;
+use tower_http::cors::CorsLayer;
+
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+
+pub struct AppState {
+    db: Pool<Postgres>,
+    env: Config,
 }
 
-#[wasm_bindgen]
-pub struct Greeter {
-  name: String,
-}
+#[tokio::main]
+async fn main() {
+    dotenv().ok();
 
-#[wasm_bindgen]
-impl Greeter {
-  #[wasm_bindgen(constructor)]
-  pub fn new(name: String) -> Self {
-    Self { name }
-  }
+    let config = Config::init();
 
-  pub fn greet(&self) -> String {
-    format!("Hello {}!", self.name)
-  }
-}
+    let pool = match PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&config.database_url)
+        .await
+    {
+        Ok(pool) => {
+            println!("✅Connection to the database is successful!");
+            pool
+        }
+        Err(err) => {
+            println!("🔥 Failed to connect to the database: {:?}", err);
+            std::process::exit(1);
+        }
+    };
 
-#[cfg(test)]
-mod tests {
-  use super::*;
+    let cors = CorsLayer::new()
+        .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_credentials(true)
+        .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);
 
-  #[test]
-  fn it_adds() {
-    let result = add(1, 2);
-    assert_eq!(result, 3);
-  }
+    let app = create_router(Arc::new(AppState {
+        db: pool.clone(),
+        env: config.clone(),
+    }))
+    .layer(cors);
 
-  #[test]
-  fn it_greets() {
-    let greeter = Greeter::new("world".into());
-    assert_eq!(greeter.greet(), "Hello world!");
-  }
+    println!("🚀 Server started successfully");
+    axum::Server::bind(&"0.0.0.0:8001".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
